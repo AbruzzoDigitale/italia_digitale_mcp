@@ -1,0 +1,27 @@
+{
+  "servers": {
+    "trello": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/build/index.js"],
+      "env": {
+        "TRELLO_API_KEY": "${input:trelloApiKey}",
+        "TRELLO_TOKEN": "${input:trelloToken}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "trelloApiKey",
+      "type": "promptString",
+      "description": "Trello API Key",
+      "password": false
+    },
+    {
+      "id": "trelloToken",
+      "type": "promptString",
+      "description": "Trello Token",
+      "password": true
+    }
+  ]
+}
