@@ -1,17 +1,16 @@
-# Trello MCP Server
+# Italia Digitale MCP
 
-MCP Server TypeScript per integrare Trello con Claude Desktop e altri client MCP compatibili.
+MCP Server TypeScript per integrare strumenti di produttività con Claude Desktop e altri client MCP compatibili.
 
-Espone **24 tool** che coprono board, liste, card, commenti, membri, label, checklist e ricerca.
+Attualmente espone tool per **Trello** (board, liste, card, commenti, membri, label, checklist, ricerca) e comandi di **sistema** (aggiornamenti automatici).
 
 ---
 
 ## Indice
 
 - [Prerequisiti](#prerequisiti)
-- [Setup locale](#setup-locale)
-- [Configurazione](#configurazione)
-- [Build & avvio](#build--avvio)
+- [Installazione](#installazione)
+- [Configurazione credenziali](#configurazione-credenziali)
 - [Integrazione con Claude Desktop](#integrazione-con-claude-desktop)
 - [Tool disponibili](#tool-disponibili)
 - [Struttura del codice](#struttura-del-codice)
@@ -23,32 +22,39 @@ Espone **24 tool** che coprono board, liste, card, commenti, membri, label, chec
 
 - Node.js 18+
 - npm 9+
-- Account Trello con API Key e Token
-
-### Ottenere API Key e Token Trello
-
-1. Vai su [https://trello.com/power-ups/admin](https://trello.com/power-ups/admin)
-2. Crea una nuova Power-Up (o usa una esistente) e copia la **API Key**
-3. Genera il **Token** visitando:
-   ```
-   https://trello.com/1/authorize?expiration=never&scope=read,write&response_type=token&key=YOUR_API_KEY
-   ```
+- Git
+- Account Trello
 
 ---
 
-## Setup locale
+## Installazione
 
 ```bash
-git clone <repo-url>
-cd trello_mcp_server
+git clone https://github.com/AbruzzoDigitale/italia_digitale_mcp.git
+cd italia_digitale_mcp
 npm install
-cp .env.example .env
-# Compila .env con le tue credenziali
+npm run build
 ```
 
 ---
 
-## Configurazione
+## Configurazione credenziali
+
+Le credenziali Trello si ottengono su [https://trello.com/app-key](https://trello.com/app-key):
+1. Copia la **API Key**
+2. Clicca su **"Token"** nella stessa pagina per generare il token di accesso
+
+Hai **due metodi** per configurarle — scegli quello che preferisci:
+
+### Metodo 1 — Tramite chat (consigliato)
+
+Una volta avviato il server, chiedi direttamente a Claude:
+
+> "Configura Trello con API Key `<la tua key>` e Token `<il tuo token>`"
+
+Claude chiamerà il tool `trello_configure` che salverà le credenziali in modo sicuro in `~/.config/italia-digitale-mcp/credentials.json` (permessi 600, solo il tuo utente può leggerlo). Non serve nessun file `.env`.
+
+### Metodo 2 — File `.env`
 
 Crea un file `.env` nella root del progetto:
 
@@ -57,28 +63,13 @@ TRELLO_API_KEY=your_api_key
 TRELLO_TOKEN=your_token
 ```
 
-> **Non committare mai il file `.env`** — è escluso dal tracking via `.gitignore`.
-
----
-
-## Build & avvio
-
-```bash
-# Compila TypeScript → build/
-npm run build
-
-# Avvia il server MCP
-npm start
-
-# Modalità watch (sviluppo)
-npm run dev
-```
+> **Non committare mai il file `.env`** — è già escluso via `.gitignore`.
 
 ---
 
 ## Integrazione con Claude Desktop
 
-Aggiungi questa configurazione al file `claude_desktop_config.json`:
+Aggiungi questa voce al file di configurazione di Claude Desktop:
 
 - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
@@ -86,23 +77,29 @@ Aggiungi questa configurazione al file `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "trello": {
+    "italia-digitale": {
       "command": "node",
-      "args": ["/absolute/path/to/trello_mcp_server/build/index.js"],
-      "env": {
-        "TRELLO_API_KEY": "your_api_key",
-        "TRELLO_TOKEN": "your_token"
-      }
+      "args": ["/percorso/assoluto/italia_digitale_mcp/build/index.js"]
     }
   }
 }
 ```
 
-> Sostituisci il percorso con quello assoluto reale della cartella del progetto.
+> Sostituisci `/percorso/assoluto/` con il percorso reale della cartella clonata.  
+> Se usi il Metodo 2 (`.env`), aggiungi `"env": { "TRELLO_API_KEY": "...", "TRELLO_TOKEN": "..." }` alla configurazione.
+
+Riavvia Claude Desktop dopo aver salvato il file.
 
 ---
 
 ## Tool disponibili
+
+### Autenticazione Trello
+
+| Tool | Descrizione |
+|------|-------------|
+| `trello_configure` | Salva API Key e Token Trello (persistente, senza `.env`) |
+| `trello_auth_status` | Mostra se le credenziali sono configurate e da dove vengono lette |
 
 ### Board
 
@@ -166,23 +163,34 @@ Aggiungi questa configurazione al file `claude_desktop_config.json`:
 |------|-------------|
 | `search_trello` | Cerca card e board su Trello |
 
+### Sistema
+
+| Tool | Descrizione |
+|------|-------------|
+| `aggiorna` | Controlla aggiornamenti su Git, fa pull e ricompila il server |
+
 ---
 
 ## Struttura del codice
 
 ```
-trello_mcp_server/
+italia_digitale_mcp/
 ├── src/
-│   ├── index.ts        # Entry point — registrazione di tutti i tool MCP
-│   └── trello.ts       # Client Trello — funzioni di accesso all'API REST
-├── build/              # Output compilato (generato da tsc, non committare)
-├── .env                # Credenziali locali (non committare)
-├── .env.example        # Template delle variabili d'ambiente
-├── tsconfig.json       # Configurazione TypeScript
+│   ├── index.ts                  # Entry point — monta tutte le categorie di tool
+│   ├── config.ts                 # Gestione credenziali su disco (~/.config/...)
+│   └── tools/
+│       ├── trello/
+│       │   ├── api.ts            # Funzioni di accesso all'API REST Trello
+│       │   └── tools.ts          # Registrazione tool Trello
+│       └── system/
+│           └── tools.ts          # Tool di sistema (aggiornamenti)
+├── build/                        # Output compilato (generato da tsc, non committare)
+├── .env.example                  # Template variabili d'ambiente
+├── tsconfig.json
 └── package.json
 ```
 
-Un dominio per file — ogni nuova area funzionale deve seguire questa separazione.
+Per aggiungere una nuova categoria di tool, crea una cartella sotto `src/tools/`, implementa `api.ts` + `tools.ts` ed esporta una funzione `registerXxxTools(server)` da chiamare in `src/index.ts`.
 
 ---
 
