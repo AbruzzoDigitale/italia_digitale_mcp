@@ -76,8 +76,22 @@ TRELLO_TOKEN=your_token
 
 ```bash
 # Dalla root del progetto (dopo npm run build)
-npx @modelcontextprotocol/inspector node build/index.js
+npm run inspect
 ```
+
+### Sviluppo con auto-reload
+
+Apri **due terminali**:
+
+```bash
+# Terminale 1 — compila in automatico ad ogni salvataggio
+npm run dev
+
+# Terminale 2 — riavvia l'inspector ad ogni modifica nel build/
+npm run dev:inspect
+```
+
+Ogni volta che salvi un file `.ts`, tsc lo ricompila e nodemon rilancia automaticamente il server. Nel browser basta cliccare **Reconnect**.
 
 Al primo avvio scarica automaticamente il pacchetto. Alla fine vedrai un output simile a:
 
