@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Italia Digitale" width="120" />
+</p>
+
 # Italia Digitale MCP
 
 MCP Server TypeScript per integrare strumenti di produttività con Claude Desktop e altri client MCP compatibili.
