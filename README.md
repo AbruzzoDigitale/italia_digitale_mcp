@@ -11,6 +11,7 @@ Attualmente espone tool per **Trello** (board, liste, card, commenti, membri, la
 - [Prerequisiti](#prerequisiti)
 - [Installazione](#installazione)
 - [Configurazione credenziali](#configurazione-credenziali)
+- [Test con MCP Inspector](#test-con-mcp-inspector)
 - [Integrazione con Claude Desktop](#integrazione-con-claude-desktop)
 - [Tool disponibili](#tool-disponibili)
 - [Struttura del codice](#struttura-del-codice)
@@ -67,7 +68,48 @@ TRELLO_TOKEN=your_token
 
 ---
 
-## Integrazione con Claude Desktop
+## Test con MCP Inspector
+
+[MCP Inspector](https://github.com/modelcontextprotocol/inspector) è lo strumento ufficiale per testare il server localmente **senza usare Claude**.
+
+### Avvio
+
+```bash
+# Dalla root del progetto (dopo npm run build)
+npx @modelcontextprotocol/inspector node build/index.js
+```
+
+Al primo avvio scarica automaticamente il pacchetto. Alla fine vedrai un output simile a:
+
+```
+⚙️ Proxy server listening on localhost:6277
+🚀 MCP Inspector is up and running at:
+   http://localhost:6274/?MCP_PROXY_AUTH_TOKEN=<token>
+```
+
+Il browser si apre automaticamente. Se non si apre, copia e incolla l'URL nel browser.
+
+### Utilizzo
+
+1. Clicca **Connect** per collegare l'inspector al server
+2. Vai nella tab **Tools** per vedere tutti i tool disponibili
+3. Seleziona un tool, compila i parametri e clicca **Run**
+
+### Primo avvio: configura le credenziali
+
+Se non hai un file `.env`, usa il tool `trello_configure` direttamente dall'inspector:
+
+- Tool: `trello_configure`
+- Parametri:
+  - `apiKey`: la tua API Key da [trello.com/app-key](https://trello.com/app-key)
+  - `token`: il tuo Token dalla stessa pagina
+- Clicca **Run** → le credenziali vengono salvate in `~/.config/italia-digitale-mcp/credentials.json`
+
+Poi verifica con `trello_auth_status` che tutto sia corretto prima di testare gli altri tool.
+
+---
+
+
 
 Aggiungi questa voce al file di configurazione di Claude Desktop:
 
