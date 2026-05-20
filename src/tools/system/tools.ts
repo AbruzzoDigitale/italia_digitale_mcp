@@ -70,6 +70,12 @@ export function registerSystemTools(server: McpServer): void {
         lines.push("✅ Codice aggiornato.");
         lines.push("");
 
+        // Installa eventuali nuove dipendenze
+        lines.push("📦 Installazione dipendenze (npm install)...");
+        run("npm install");
+        lines.push("✅ Dipendenze aggiornate.");
+        lines.push("");
+
         // Ricompila
         lines.push("🔨 Ricompilazione in corso (npm run build)...");
         run("npm run build");

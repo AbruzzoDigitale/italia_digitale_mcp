@@ -117,6 +117,32 @@ git push origin feat/my-feature
 
 ---
 
+## Pubblicare una nuova Release
+
+Quando `main` contiene una versione stabile da distribuire:
+
+1. **Aggiorna la versione** in `package.json` (seguendo [semver](https://semver.org/))
+2. **Esegui build e compilazione binari:**
+   ```bash
+   npm run build
+   npm run build:exe
+   ```
+3. **Crea la tag e pubblica la release su GitHub:**
+   ```bash
+   gh release create v1.x.x dist/* \
+     --title "v1.x.x — Descrizione" \
+     --notes "Cosa è cambiato in questa versione"
+   ```
+4. I 4 binari in `dist/` vengono allegati automaticamente:
+   - `italia-digitale-mcp-installer-win-x64.exe`
+   - `italia-digitale-mcp-installer-macos-arm64`
+   - `italia-digitale-mcp-installer-macos-x64`
+   - `italia-digitale-mcp-installer-linux-x64`
+
+> La cartella `dist/` è in `.gitignore` — i binari vengono distribuiti **solo** tramite GitHub Releases, mai committati nel repo.
+
+---
+
 ## Code Conventions
 
 - **TypeScript** with strict mode enabled (`tsconfig.json`)
