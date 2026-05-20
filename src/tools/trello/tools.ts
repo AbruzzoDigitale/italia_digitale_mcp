@@ -675,14 +675,21 @@ export function registerTrelloTools(server: McpServer): void {
             "'overdue' (scadute), 'due_soon' (scadono entro 7 giorni), " +
             "'complete' (completate), 'no_due' (senza scadenza), 'all' (tutte, default)"
           ),
+        maxCardsPerList: z
+          .number()
+          .optional()
+          .describe("Numero massimo di card per lista (default: 5). Usa 0 per mostrare tutte."),
       },
     },
-    async ({ boardFilter, memberUsername, labelName, dueStatus }) => {
+    async ({ boardFilter, memberUsername, labelName, dueStatus, maxCardsPerList }) => {
       const overviews = await getBoardOverview(boardFilter ?? "open");
       const now = new Date();
       const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const limit = maxCardsPerList === 0 ? Infinity : (maxCardsPerList ?? 5);
 
       const lines: string[] = [];
+      let totalBoards = 0;
+      let totalCards = 0;
 
       for (const board of overviews) {
         const boardLines: string[] = [];
@@ -730,9 +737,13 @@ export function registerTrelloTools(server: McpServer): void {
 
           if (cards.length === 0) continue;
 
+          const shown = isFinite(limit) ? cards.slice(0, limit) : cards;
+          const hidden = cards.length - shown.length;
+          totalCards += cards.length;
+
           boardLines.push(`  📋 ${list.name} (${cards.length})`);
 
-          for (const card of cards) {
+          for (const card of shown) {
             const labelStr = card.labels
               .map((l) => `[${l.name || l.color}]`)
               .join(" ");
@@ -753,9 +764,14 @@ export function registerTrelloTools(server: McpServer): void {
             const parts = [card.name, labelStr, dueStr, memberStr].filter(Boolean);
             boardLines.push(`    • ${parts.join("  ")}`);
           }
+
+          if (hidden > 0) {
+            boardLines.push(`    … +${hidden} altre card (usa maxCardsPerList:0 per vedere tutte)`);
+          }
         }
 
         if (boardLines.length > 0) {
+          totalBoards++;
           lines.push(`🗂 ${board.name}`);
           lines.push(...boardLines);
           lines.push("");
@@ -770,7 +786,9 @@ export function registerTrelloTools(server: McpServer): void {
         };
       }
 
-      return { content: [{ type: "text", text: lines.join("\n") }] };
+      const header = `📊 Panoramica: ${totalBoards} board · ${totalCards} card${isFinite(limit) ? ` (max ${limit} per lista)` : ""}\n${"─".repeat(48)}\n`;
+      return { content: [{ type: "text", text: header + lines.join("\n") }] };
     }
   );
 }
+
