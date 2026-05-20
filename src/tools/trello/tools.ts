@@ -26,6 +26,7 @@ import {
   getChecklists,
   searchTrello,
   getBoardOverview,
+  type MemberRef,
 } from "./api.js";
 
 export function registerTrelloTools(server: McpServer): void {
@@ -175,6 +176,15 @@ export function registerTrelloTools(server: McpServer): void {
   registry.add({ name: "search_trello", title: "Cerca su Trello", category: "🔍 Ricerca",
     description: "Cerca card e board tramite testo libero.",
     params: [{ name: "query", type: "string", required: true, description: "Termine di ricerca" }],
+  });
+  registry.add({ name: "get_report_operatore", title: "Report Attività Operatore ⭐", category: "👥 Operatori",
+    description: "Mostra le attività raggruppate per operatore: ⚠️ scadute · 🔔 in scadenza · 🔄 in corso · ✅ completate.\nInclude tutti gli ID (card, board, lista) riutilizzabili nelle altre funzioni.",
+    params: [
+      { name: "operatore",         type: "string", required: false,                                                 description: "Username o nome operatore (es. 'mario.rossi'). Se omesso, mostra tutti gli operatori." },
+      { name: "boardFilter",       type: "enum",   required: false, values: "`open` `closed` `all`",               description: "Board da includere (default: open)" },
+      { name: "includeCompleted",  type: "boolean",required: false,                                                 description: "Includi le card completate (default: true)" },
+      { name: "maxCardsPerSection",type: "number", required: false,                                                 description: "Max card per sezione per operatore (default: 20). Usa 0 per tutte." },
+    ],
   });
 
   // ─── AUTENTICAZIONE ─────────────────────────────────────────────────────────
@@ -787,6 +797,184 @@ export function registerTrelloTools(server: McpServer): void {
       }
 
       const header = `📊 Panoramica: ${totalBoards} board · ${totalCards} card${isFinite(limit) ? ` (max ${limit} per lista)` : ""}\n${"─".repeat(48)}\n`;
+      return { content: [{ type: "text", text: header + lines.join("\n") }] };
+    }
+  );
+
+  // ─── REPORT OPERATORE ───────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_report_operatore",
+    {
+      title: "Report Attività per Operatore",
+      description:
+        "Mostra le attività raggruppate per operatore con tutte le sezioni: scadute, in scadenza, in corso e completate. " +
+        "Per ogni card vengono riportati: titolo, etichette, data di scadenza e gli ID di card/board/lista " +
+        "direttamente riutilizzabili nelle altre funzioni (update_card, move_card, add_comment, ecc.).",
+      inputSchema: {
+        operatore: z
+          .string()
+          .optional()
+          .describe("Username o nome dell'operatore (es. 'mario.rossi'). Se omesso mostra tutti gli operatori."),
+        boardFilter: z
+          .enum(["open", "closed", "all"])
+          .optional()
+          .describe("Board da includere: 'open' (default), 'closed', 'all'"),
+        includeCompleted: z
+          .boolean()
+          .optional()
+          .describe("Includi le card con scadenza completata (default: true)"),
+        maxCardsPerSection: z
+          .number()
+          .optional()
+          .describe("Numero massimo di card per sezione per operatore (default: 20). Usa 0 per mostrare tutte."),
+      },
+    },
+    async ({ operatore, boardFilter, includeCompleted, maxCardsPerSection }) => {
+      const overviews = await getBoardOverview(boardFilter ?? "open");
+      const now = new Date();
+      const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const sectionLimit = maxCardsPerSection === 0 ? Infinity : (maxCardsPerSection ?? 20);
+      const showCompleted = includeCompleted !== false;
+
+      // Arricchisce ogni card con il contesto di board
+      interface CardWithCtx {
+        id: string;
+        name: string;
+        due: string | null;
+        dueComplete: boolean;
+        labels: { id: string; name: string; color: string }[];
+        members: MemberRef[];
+        listId: string;
+        listName: string;
+        boardId: string;
+        boardName: string;
+        url: string;
+      }
+
+      // Raggruppa per membro
+      const memberMap = new Map<string, { ref: MemberRef; cards: CardWithCtx[] }>();
+
+      for (const board of overviews) {
+        for (const list of board.lists) {
+          for (const card of list.cards) {
+            const enriched: CardWithCtx = {
+              id: card.id,
+              name: card.name,
+              due: card.due,
+              dueComplete: card.dueComplete,
+              labels: card.labels,
+              members: card.members,
+              listId: card.listId,
+              listName: card.listName,
+              boardId: board.id,
+              boardName: board.name,
+              url: card.url,
+            };
+            for (const member of card.members) {
+              if (!memberMap.has(member.id)) {
+                memberMap.set(member.id, { ref: member, cards: [] });
+              }
+              memberMap.get(member.id)!.cards.push(enriched);
+            }
+          }
+        }
+      }
+
+      // Filtra per operatore se specificato
+      let members = [...memberMap.values()].sort((a, b) =>
+        a.ref.fullName.localeCompare(b.ref.fullName)
+      );
+      if (operatore) {
+        const q = operatore.toLowerCase();
+        members = members.filter(
+          (m) =>
+            m.ref.username.toLowerCase().includes(q) ||
+            m.ref.fullName.toLowerCase().includes(q)
+        );
+        if (members.length === 0) {
+          return {
+            content: [
+              { type: "text", text: `Nessun operatore trovato con il filtro "${operatore}".` },
+            ],
+          };
+        }
+      }
+
+      if (members.length === 0) {
+        return {
+          content: [{ type: "text", text: "Nessuna card assegnata trovata." }],
+        };
+      }
+
+      // Formatta una card con ID e contesto
+      const formatCard = (card: CardWithCtx): string[] => {
+        const labelStr = card.labels.map((l) => `[${l.name || l.color}]`).join(" ");
+        let dueStr = "";
+        if (card.due) {
+          const d = new Date(card.due);
+          const fmt = d.toLocaleDateString("it-IT");
+          if (card.dueComplete)      dueStr = `✅ ${fmt}`;
+          else if (d < now)          dueStr = `⚠️ SCADUTA ${fmt}`;
+          else if (d <= soon)        dueStr = `🔔 ${fmt}`;
+          else                       dueStr = `📅 ${fmt}`;
+        }
+        const titleParts = [card.name, labelStr, dueStr].filter(Boolean);
+        return [
+          `     • ${titleParts.join("  ")}`,
+          `       🗂 ${card.boardName}  ›  📋 ${card.listName}`,
+          `       🆔 card:${card.id}  board:${card.boardId}  lista:${card.listId}`,
+        ];
+      };
+
+      // Renderizza una sezione (scadute, in scadenza, ecc.)
+      const renderSection = (
+        emoji: string,
+        title: string,
+        sectionCards: CardWithCtx[],
+        out: string[]
+      ): void => {
+        if (sectionCards.length === 0) return;
+        const shown = isFinite(sectionLimit) ? sectionCards.slice(0, sectionLimit) : sectionCards;
+        const hidden = sectionCards.length - shown.length;
+        out.push(`\n   ${emoji} ${title} (${sectionCards.length})`);
+        for (const card of shown) out.push(...formatCard(card));
+        if (hidden > 0) {
+          out.push(`     … +${hidden} altre (usa maxCardsPerSection:0 per vedere tutte)`);
+        }
+      };
+
+      const lines: string[] = [];
+
+      for (const { ref, cards } of members) {
+        const overdue    = cards.filter((c) => c.due && !c.dueComplete && new Date(c.due) < now);
+        const dueSoon    = cards.filter((c) => c.due && !c.dueComplete && new Date(c.due) >= now && new Date(c.due) <= soon);
+        const inProgress = cards.filter((c) => !c.dueComplete && (!c.due || new Date(c.due) > soon));
+        const completed  = cards.filter((c) => c.dueComplete);
+
+        const summaryParts = [
+          overdue.length    > 0 ? `${overdue.length} scadute`                 : null,
+          dueSoon.length    > 0 ? `${dueSoon.length} in scadenza`             : null,
+          inProgress.length > 0 ? `${inProgress.length} in corso`             : null,
+          showCompleted && completed.length > 0 ? `${completed.length} completate` : null,
+        ].filter(Boolean);
+
+        lines.push(`👤 ${ref.fullName} (@${ref.username})`);
+        lines.push(`   🆔 Member ID: ${ref.id}`);
+        lines.push(`   📊 ${summaryParts.join(" · ") || "nessuna attività assegnata"}`);
+
+        renderSection("⚠️",  "SCADUTE",                   overdue,    lines);
+        renderSection("🔔",  "IN SCADENZA (entro 7 giorni)", dueSoon, lines);
+        renderSection("🔄",  "IN CORSO",                  inProgress, lines);
+        if (showCompleted) renderSection("✅", "COMPLETATE", completed, lines);
+
+        lines.push("\n" + "─".repeat(48));
+      }
+
+      const total = members.length;
+      const header =
+        `📋 Report Attività — ${total} operator${total === 1 ? "e" : "i"}\n` +
+        `${"═".repeat(48)}\n\n`;
       return { content: [{ type: "text", text: header + lines.join("\n") }] };
     }
   );
