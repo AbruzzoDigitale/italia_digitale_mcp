@@ -24,9 +24,12 @@ const warn = (m) => console.log(`${c.yellow}  !    ${c.reset}${m}`);
 const err  = (m) => { console.log(`${c.red}  ERR  ${c.reset}${m}`); process.exit(1); };
 const sep  = ()  => console.log(`${c.gray}${"─".repeat(46)}${c.reset}`);
 
-// ─── Path del progetto ────────────────────────────────────────────────────────
-// Quando compilato con pkg, __dirname punta alla directory dell'exe
-const PROJECT_DIR = path.resolve(__dirname, "..");
+// ─── Directory di installazione (fissa, indipendente dalla posizione dell'exe) ─
+// NON usare __dirname: dentro un binario pkg è un percorso virtuale (/snapshot/…)
+const REPO_URL   = "https://github.com/AbruzzoDigitale/italia_digitale_mcp.git";
+const PROJECT_DIR = isWin
+  ? path.join(os.homedir(), "AppData", "Local", "AbruzzoDigitale", "italia-digitale-mcp")
+  : path.join(os.homedir(), ".local", "share", "italia-digitale-mcp");
 
 // ─── Path Claude Desktop config (per OS) ──────────────────────────────────────
 function getClaudeConfigPath() {
@@ -77,23 +80,62 @@ async function main() {
     err("Node.js non trovato.\nScarica e installa Node.js 18+ da: https://nodejs.org\nPoi esegui di nuovo questo installer.");
   }
 
-  // ── 2. Build ──────────────────────────────────────────────────────────────
+  // ── 1b. Verifica Git ──────────────────────────────────────────────────────
+  info("Verifica Git...");
+  try {
+    const gitVer = execSync("git --version", { encoding: "utf-8" }).trim();
+    ok(`${gitVer} trovato.`);
+  } catch {
+    err("Git non trovato.\nScarica e installa Git da: https://git-scm.com\nPoi esegui di nuovo questo installer.");
+  }
+
+  // ── 2. Clona o aggiorna il repo ───────────────────────────────────────────
   sep();
   const buildPath = path.join(PROJECT_DIR, "build", "index.js");
-  if (!fs.existsSync(buildPath)) {
-    info("Build non trovata. Installo le dipendenze e compilo...");
+  const gitDir    = path.join(PROJECT_DIR, ".git");
+
+  if (!fs.existsSync(gitDir)) {
+    info(`Scarico il server in:\n     ${PROJECT_DIR}`);
+    fs.mkdirSync(path.dirname(PROJECT_DIR), { recursive: true });
     try {
-      execSync("npm install --silent", { cwd: PROJECT_DIR, stdio: "inherit" });
-      execSync("npm run build",         { cwd: PROJECT_DIR, stdio: "inherit" });
+      execSync(`git clone "${REPO_URL}" "${PROJECT_DIR}"`, { stdio: "inherit" });
+      ok("Repository scaricato.");
+    } catch {
+      err("Errore durante il download del repository.\nVerifica la connessione internet e riprova.");
+    }
+  } else {
+    info("Repository già presente. Aggiorno all'ultima versione...");
+    try {
+      execSync("git pull --ff-only origin main", { cwd: PROJECT_DIR, stdio: "inherit" });
+      ok("Repository aggiornato.");
+    } catch {
+      warn("Impossibile aggiornare automaticamente. Continuo con la versione esistente.");
+    }
+  }
+
+  // ── 3. npm install + build ────────────────────────────────────────────────
+  sep();
+  info("Installo le dipendenze (npm install)...");
+  try {
+    execSync("npm install --silent", { cwd: PROJECT_DIR, stdio: "inherit" });
+    ok("Dipendenze installate.");
+  } catch {
+    err("Errore durante npm install.\nVerifica la connessione internet e riprova.");
+  }
+
+  if (!fs.existsSync(buildPath)) {
+    info("Compilo il server (npm run build)...");
+    try {
+      execSync("npm run build", { cwd: PROJECT_DIR, stdio: "inherit" });
       ok("Build completata.");
     } catch {
-      err("Errore durante la build. Verifica che npm sia installato correttamente.");
+      err("Errore durante la compilazione.\nVerifica che Node.js e npm siano installati correttamente.");
     }
   } else {
     ok("Build trovata.");
   }
 
-  // ── 3. Credenziali Trello ─────────────────────────────────────────────────
+  // ── 4. Credenziali Trello ─────────────────────────────────────────────────
   sep();
   console.log(`\n${c.bold}  Credenziali Trello${c.reset}`);
   console.log(`\n  Ottieni API Key e Token su: ${c.cyan}https://trello.com/app-key${c.reset}\n`);
@@ -114,7 +156,7 @@ async function main() {
 
   ok(`Credenziali salvate in ${credsPath}`);
 
-  // ── 4. Claude Desktop config ──────────────────────────────────────────────
+  // ── 5. Claude Desktop config ──────────────────────────────────────────────
   sep();
   info("Configurazione Claude Desktop...");
 
@@ -132,7 +174,7 @@ async function main() {
 
   rl.close();
 
-  // ── 5. Fine ───────────────────────────────────────────────────────────────
+  // ── 6. Fine ───────────────────────────────────────────────────────────────
   sep();
   console.log(`\n${c.bold}${c.green}  Installazione completata!${c.reset}\n`);
   console.log(`  ${c.bold}Prossimo passo:${c.reset} ${c.yellow}riavvia Claude Desktop${c.reset} per attivare il server.\n`);
