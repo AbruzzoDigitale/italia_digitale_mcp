@@ -345,7 +345,7 @@ export async function getBoardOverview(
 
   const overviews: BoardOverview[] = [];
   for (let i = 0; i < boards.length; i++) {
-    if (i > 0) await delay(300);
+    if (i > 0) await delay(150);
     overviews.push(await fetchBoardData(client, boards[i]));
   }
 

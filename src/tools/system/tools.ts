@@ -1,6 +1,7 @@
 import { execSync } from "child_process";
+import { statSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
-import { dirname, resolve } from "path";
+import { dirname, resolve, join } from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registry } from "../registry.js";
 
@@ -70,10 +71,19 @@ export function registerSystemTools(server: McpServer): void {
         lines.push("✅ Codice aggiornato.");
         lines.push("");
 
-        // Installa eventuali nuove dipendenze
-        lines.push("📦 Installazione dipendenze (npm install)...");
-        run("npm install");
-        lines.push("✅ Dipendenze aggiornate.");
+        // Installa dipendenze solo se package.json è cambiato dall'ultimo install
+        const pkgJson      = join(PROJECT_ROOT, "package.json");
+        const installedLock = join(PROJECT_ROOT, "node_modules", ".package-lock.json");
+        const needsInstall  = !existsSync(installedLock) ||
+          statSync(pkgJson).mtimeMs > statSync(installedLock).mtimeMs;
+
+        if (needsInstall) {
+          lines.push("📦 Installazione dipendenze (npm install)...");
+          run("npm install --prefer-offline --no-audit --no-fund");
+          lines.push("✅ Dipendenze aggiornate.");
+        } else {
+          lines.push("✅ Dipendenze già aggiornate, skip npm install.");
+        }
         lines.push("");
 
         // Ricompila
