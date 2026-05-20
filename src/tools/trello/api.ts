@@ -30,11 +30,39 @@ function getClient(): AxiosInstance {
 
 // ─── BOARD ────────────────────────────────────────────────────────────────────
 
-export async function getBoards() {
-  const res = await getClient().get("/members/me/boards", {
-    params: { fields: "id,name,desc,url,closed" },
+export async function getBoards(filter: "open" | "closed" | "all" = "all") {
+  const client = getClient();
+
+  // 1. Board dove l'utente è membro diretto
+  const memberBoards = await client.get("/members/me/boards", {
+    params: { fields: "id,name,desc,url,closed", filter },
   });
-  return res.data;
+
+  // 2. Board delle organizzazioni/workspace a cui l'utente appartiene
+  const orgsRes = await client.get("/members/me/organizations", {
+    params: { fields: "id,name" },
+  });
+  const orgBoards = await Promise.all(
+    orgsRes.data.map((org: { id: string }) =>
+      client
+        .get(`/organizations/${org.id}/boards`, {
+          params: { fields: "id,name,desc,url,closed", filter },
+        })
+        .then((r) => r.data)
+    )
+  );
+
+  // 3. Unione e deduplicazione per ID
+  const allBoards = [
+    ...memberBoards.data,
+    ...orgBoards.flat(),
+  ];
+  const seen = new Set<string>();
+  return allBoards.filter((b: { id: string }) => {
+    if (seen.has(b.id)) return false;
+    seen.add(b.id);
+    return true;
+  });
 }
 
 export async function getBoard(boardId: string) {
@@ -205,4 +233,121 @@ export async function searchTrello(query: string) {
     params: { query, modelTypes: "cards,boards", cards_limit: 20, boards_limit: 5 },
   });
   return res.data;
+}
+
+// ─── OVERVIEW ─────────────────────────────────────────────────────────────────
+
+export interface MemberRef {
+  id: string;
+  username: string;
+  fullName: string;
+}
+
+export interface CardOverview {
+  id: string;
+  name: string;
+  due: string | null;
+  dueComplete: boolean;
+  labels: { id: string; name: string; color: string }[];
+  members: MemberRef[];
+  listId: string;
+  listName: string;
+  url: string;
+}
+
+export interface ListOverview {
+  id: string;
+  name: string;
+  cards: CardOverview[];
+}
+
+export interface BoardOverview {
+  id: string;
+  name: string;
+  url: string;
+  lists: ListOverview[];
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchBoardData(
+  client: AxiosInstance,
+  board: { id: string; name: string; url: string }
+): Promise<BoardOverview> {
+  const [listsRaw, cardsRaw, membersRaw] = await Promise.all([
+    client
+      .get(`/boards/${board.id}/lists`, {
+        params: { fields: "id,name", filter: "open" },
+      })
+      .then((r) => r.data),
+    client
+      .get(`/boards/${board.id}/cards`, {
+        params: {
+          fields: "id,name,due,dueComplete,labels,idMembers,idList,url",
+          filter: "open",
+        },
+      })
+      .then((r) => r.data),
+    client
+      .get(`/boards/${board.id}/members`, {
+        params: { fields: "id,username,fullName" },
+      })
+      .then((r) => r.data),
+  ]);
+
+  const memberMap: Record<string, MemberRef> = {};
+  for (const m of membersRaw) {
+    memberMap[m.id] = { id: m.id, username: m.username, fullName: m.fullName };
+  }
+
+  const lists: ListOverview[] = listsRaw.map(
+    (list: { id: string; name: string }) => ({
+      id: list.id,
+      name: list.name,
+      cards: cardsRaw
+        .filter((c: { idList: string }) => c.idList === list.id)
+        .map(
+          (c: {
+            id: string;
+            name: string;
+            due: string | null;
+            dueComplete: boolean;
+            labels: { id: string; name: string; color: string }[];
+            idMembers: string[];
+            url: string;
+          }) => ({
+            id: c.id,
+            name: c.name,
+            due: c.due ?? null,
+            dueComplete: c.dueComplete ?? false,
+            labels: c.labels ?? [],
+            members: (c.idMembers ?? []).map(
+              (mid) =>
+                memberMap[mid] ?? { id: mid, username: mid, fullName: mid }
+            ),
+            listId: list.id,
+            listName: list.name,
+            url: c.url,
+          })
+        ),
+    })
+  );
+
+  return { id: board.id, name: board.name, url: board.url, lists };
+}
+
+export async function getBoardOverview(
+  boardFilter: "open" | "closed" | "all" = "open"
+): Promise<BoardOverview[]> {
+  const client = getClient();
+  const boards: { id: string; name: string; url: string }[] =
+    await getBoards(boardFilter);
+
+  const overviews: BoardOverview[] = [];
+  for (let i = 0; i < boards.length; i++) {
+    if (i > 0) await delay(300);
+    overviews.push(await fetchBoardData(client, boards[i]));
+  }
+
+  return overviews;
 }

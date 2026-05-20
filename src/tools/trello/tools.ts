@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadCredentials, saveCredentials, getCredentialsPath } from "../../config.js";
+import { registry } from "../registry.js";
 import {
   getBoards,
   getBoard,
@@ -24,9 +25,158 @@ import {
   addCheckItem,
   getChecklists,
   searchTrello,
+  getBoardOverview,
 } from "./api.js";
 
 export function registerTrelloTools(server: McpServer): void {
+
+  // ─── REGISTRO DOCUMENTAZIONE ────────────────────────────────────────────────
+
+  registry.add({ name: "trello_configure", title: "Configura Credenziali Trello", category: "🔐 Autenticazione Trello",
+    description: "Salva API Key e Token Trello in `~/.config/italia-digitale-mcp/credentials.json`.\nOttieni le credenziali su https://trello.com/app-key",
+    params: [
+      { name: "apiKey", type: "string", required: true, description: "API Key Trello" },
+      { name: "token",  type: "string", required: true, description: "Token Trello" },
+    ],
+  });
+  registry.add({ name: "trello_auth_status", title: "Stato Autenticazione", category: "🔐 Autenticazione Trello",
+    description: "Mostra se le credenziali sono configurate e da dove vengono lette.",
+  });
+  registry.add({ name: "get_overview", title: "Panoramica Board ⭐", category: "🗂 Panoramica",
+    description: "Vista riepilogativa di tutte le board con liste e card. Icone: ⚠️ scaduta · 🔔 scade entro 7gg · 📅 futura · ✅ completata.",
+    params: [
+      { name: "boardFilter",    type: "enum",   required: false, values: "`open` `closed` `all`",                                    description: "Board da includere (default: open)" },
+      { name: "memberUsername", type: "string", required: false,                                                                      description: "Filtra per nome/username operatore" },
+      { name: "labelName",      type: "string", required: false,                                                                      description: "Filtra per nome/colore etichetta" },
+      { name: "dueStatus",      type: "enum",   required: false, values: "`all` `overdue` `due_soon` `complete` `no_due`",            description: "Filtra per stato scadenza (default: all)" },
+    ],
+  });
+  registry.add({ name: "get_boards",  title: "Ottieni Board",  category: "📋 Board",
+    description: "Restituisce le board dell'utente.",
+    params: [{ name: "filter", type: "enum", required: false, values: "`open` `closed` `all`", description: "Default: all" }],
+  });
+  registry.add({ name: "get_board",   title: "Dettaglio Board", category: "📋 Board",
+    description: "Dettagli di una board specifica.",
+    params: [{ name: "boardId", type: "string", required: true, description: "ID della board" }],
+  });
+  registry.add({ name: "create_board", title: "Crea Board", category: "📋 Board",
+    description: "Crea una nuova board.",
+    params: [
+      { name: "name", type: "string", required: true,  description: "Nome della board" },
+      { name: "desc", type: "string", required: false, description: "Descrizione (opzionale)" },
+    ],
+  });
+  registry.add({ name: "get_lists",    title: "Ottieni Liste",   category: "📝 Liste",
+    description: "Liste di una board.",
+    params: [{ name: "boardId", type: "string", required: true, description: "ID della board" }],
+  });
+  registry.add({ name: "create_list",  title: "Crea Lista",      category: "📝 Liste",
+    description: "Crea una lista in una board.",
+    params: [
+      { name: "boardId", type: "string", required: true, description: "ID della board" },
+      { name: "name",    type: "string", required: true, description: "Nome della lista" },
+    ],
+  });
+  registry.add({ name: "archive_list", title: "Archivia Lista",  category: "📝 Liste",
+    description: "Archivia una lista.",
+    params: [{ name: "listId", type: "string", required: true, description: "ID della lista" }],
+  });
+  registry.add({ name: "get_cards",   title: "Ottieni Card",  category: "🃏 Card",
+    description: "Card di una lista.",
+    params: [{ name: "listId", type: "string", required: true, description: "ID della lista" }],
+  });
+  registry.add({ name: "get_card",    title: "Dettaglio Card", category: "🃏 Card",
+    description: "Dettaglio di una card.",
+    params: [{ name: "cardId", type: "string", required: true, description: "ID della card" }],
+  });
+  registry.add({ name: "create_card", title: "Crea Card",     category: "🃏 Card",
+    description: "Crea una nuova card in una lista.",
+    params: [
+      { name: "listId", type: "string", required: true,  description: "ID della lista" },
+      { name: "name",   type: "string", required: true,  description: "Titolo della card" },
+      { name: "desc",   type: "string", required: false, description: "Descrizione" },
+      { name: "due",    type: "string", required: false, description: "Scadenza ISO 8601 (es. 2026-05-30T10:00:00.000Z)" },
+    ],
+  });
+  registry.add({ name: "update_card", title: "Aggiorna Card", category: "🃏 Card",
+    description: "Aggiorna i campi di una card esistente.",
+    params: [
+      { name: "cardId",      type: "string",  required: true,  description: "ID della card" },
+      { name: "name",        type: "string",  required: false, description: "Nuovo nome" },
+      { name: "desc",        type: "string",  required: false, description: "Nuova descrizione" },
+      { name: "due",         type: "string",  required: false, description: "Nuova scadenza ISO 8601" },
+      { name: "dueComplete", type: "boolean", required: false, description: "Segna scadenza come completata" },
+      { name: "idList",      type: "string",  required: false, description: "ID lista destinazione (sposta card)" },
+      { name: "closed",      type: "boolean", required: false, description: "Archivia se true" },
+    ],
+  });
+  registry.add({ name: "delete_card", title: "Elimina Card",  category: "🃏 Card",
+    description: "Elimina definitivamente una card.",
+    params: [{ name: "cardId", type: "string", required: true, description: "ID della card" }],
+  });
+  registry.add({ name: "move_card",   title: "Sposta Card",   category: "🃏 Card",
+    description: "Sposta una card in un'altra lista.",
+    params: [
+      { name: "cardId", type: "string", required: true, description: "ID della card" },
+      { name: "listId", type: "string", required: true, description: "ID lista di destinazione" },
+    ],
+  });
+  registry.add({ name: "add_comment",  title: "Aggiungi Commento", category: "💬 Commenti",
+    description: "Aggiunge un commento a una card.",
+    params: [
+      { name: "cardId", type: "string", required: true, description: "ID della card" },
+      { name: "text",   type: "string", required: true, description: "Testo del commento" },
+    ],
+  });
+  registry.add({ name: "get_comments", title: "Ottieni Commenti",  category: "💬 Commenti",
+    description: "Commenti di una card.",
+    params: [{ name: "cardId", type: "string", required: true, description: "ID della card" }],
+  });
+  registry.add({ name: "get_members",       title: "Ottieni Membri",       category: "👥 Membri",
+    description: "Membri di una board.",
+    params: [{ name: "boardId", type: "string", required: true, description: "ID della board" }],
+  });
+  registry.add({ name: "add_member_to_card", title: "Assegna Membro a Card", category: "👥 Membri",
+    description: "Assegna un membro a una card.",
+    params: [
+      { name: "cardId",   type: "string", required: true, description: "ID della card" },
+      { name: "memberId", type: "string", required: true, description: "ID del membro" },
+    ],
+  });
+  registry.add({ name: "get_labels",      title: "Ottieni Etichette",      category: "🏷 Etichette",
+    description: "Etichette di una board.",
+    params: [{ name: "boardId", type: "string", required: true, description: "ID della board" }],
+  });
+  registry.add({ name: "add_label_to_card", title: "Aggiungi Etichetta a Card", category: "🏷 Etichette",
+    description: "Aggiunge un'etichetta a una card.",
+    params: [
+      { name: "cardId",  type: "string", required: true, description: "ID della card" },
+      { name: "labelId", type: "string", required: true, description: "ID dell'etichetta" },
+    ],
+  });
+  registry.add({ name: "create_checklist", title: "Crea Checklist",           category: "✅ Checklist",
+    description: "Crea una checklist su una card.",
+    params: [
+      { name: "cardId", type: "string", required: true, description: "ID della card" },
+      { name: "name",   type: "string", required: true, description: "Nome della checklist" },
+    ],
+  });
+  registry.add({ name: "add_check_item",   title: "Aggiungi Elemento",        category: "✅ Checklist",
+    description: "Aggiunge un elemento a una checklist.",
+    params: [
+      { name: "checklistId", type: "string", required: true, description: "ID della checklist" },
+      { name: "name",        type: "string", required: true, description: "Testo dell'elemento" },
+    ],
+  });
+  registry.add({ name: "get_checklists",   title: "Ottieni Checklist",        category: "✅ Checklist",
+    description: "Checklist di una card.",
+    params: [{ name: "cardId", type: "string", required: true, description: "ID della card" }],
+  });
+  registry.add({ name: "search_trello", title: "Cerca su Trello", category: "🔍 Ricerca",
+    description: "Cerca card e board tramite testo libero.",
+    params: [{ name: "query", type: "string", required: true, description: "Termine di ricerca" }],
+  });
+
   // ─── AUTENTICAZIONE ─────────────────────────────────────────────────────────
 
   server.registerTool(
@@ -90,11 +240,16 @@ export function registerTrelloTools(server: McpServer): void {
     "get_boards",
     {
       title: "Ottieni le Board",
-      description: "Restituisce tutte le board Trello dell'utente autenticato.",
-      inputSchema: {},
+      description: "Restituisce le board Trello dell'utente autenticato.",
+      inputSchema: {
+        filter: z
+          .enum(["open", "closed", "all"])
+          .optional()
+          .describe("Quali board restituire: 'open' (solo aperte), 'closed' (solo archiviate), 'all' (tutte). Default: 'all'"),
+      },
     },
-    async () => {
-      const boards = await getBoards();
+    async ({ filter }) => {
+      const boards = await getBoards(filter ?? "all");
       return {
         content: [{ type: "text", text: JSON.stringify(boards, null, 2) }],
       };
@@ -486,6 +641,136 @@ export function registerTrelloTools(server: McpServer): void {
       return {
         content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
       };
+    }
+  );
+
+  // ─── PANORAMICA ─────────────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_overview",
+    {
+      title: "Panoramica Board",
+      description:
+        "Restituisce una vista riepilogativa di tutte le board con le relative liste e card aperte. " +
+        "Mostra per ogni card: titolo, etichette, data di scadenza (con indicatori visivi per card scadute o in scadenza) e operatori assegnati. " +
+        "Supporta filtri per operatore, etichetta e stato scadenza.",
+      inputSchema: {
+        boardFilter: z
+          .enum(["open", "closed", "all"])
+          .optional()
+          .describe("Quali board includere: 'open' (default), 'closed', 'all'"),
+        memberUsername: z
+          .string()
+          .optional()
+          .describe("Filtra le card per nome o username dell'operatore assegnato"),
+        labelName: z
+          .string()
+          .optional()
+          .describe("Filtra le card per nome o colore dell'etichetta"),
+        dueStatus: z
+          .enum(["all", "overdue", "due_soon", "complete", "no_due"])
+          .optional()
+          .describe(
+            "Filtra per stato scadenza: " +
+            "'overdue' (scadute), 'due_soon' (scadono entro 7 giorni), " +
+            "'complete' (completate), 'no_due' (senza scadenza), 'all' (tutte, default)"
+          ),
+      },
+    },
+    async ({ boardFilter, memberUsername, labelName, dueStatus }) => {
+      const overviews = await getBoardOverview(boardFilter ?? "open");
+      const now = new Date();
+      const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+      const lines: string[] = [];
+
+      for (const board of overviews) {
+        const boardLines: string[] = [];
+
+        for (const list of board.lists) {
+          let cards = list.cards;
+
+          // Filtro operatore
+          if (memberUsername) {
+            const q = memberUsername.toLowerCase();
+            cards = cards.filter((c) =>
+              c.members.some(
+                (m) =>
+                  m.username.toLowerCase().includes(q) ||
+                  m.fullName.toLowerCase().includes(q)
+              )
+            );
+          }
+
+          // Filtro etichetta
+          if (labelName) {
+            const q = labelName.toLowerCase();
+            cards = cards.filter((c) =>
+              c.labels.some(
+                (l) =>
+                  l.name.toLowerCase().includes(q) ||
+                  l.color.toLowerCase().includes(q)
+              )
+            );
+          }
+
+          // Filtro stato scadenza
+          const status = dueStatus ?? "all";
+          if (status !== "all") {
+            cards = cards.filter((c) => {
+              if (status === "no_due") return !c.due;
+              if (status === "complete") return c.dueComplete;
+              if (!c.due) return false;
+              const d = new Date(c.due);
+              if (status === "overdue") return !c.dueComplete && d < now;
+              if (status === "due_soon") return !c.dueComplete && d >= now && d <= soon;
+              return true;
+            });
+          }
+
+          if (cards.length === 0) continue;
+
+          boardLines.push(`  📋 ${list.name} (${cards.length})`);
+
+          for (const card of cards) {
+            const labelStr = card.labels
+              .map((l) => `[${l.name || l.color}]`)
+              .join(" ");
+            const memberStr = card.members
+              .map((m) => `@${m.username}`)
+              .join(", ");
+
+            let dueStr = "";
+            if (card.due) {
+              const d = new Date(card.due);
+              const fmt = d.toLocaleDateString("it-IT");
+              if (card.dueComplete) dueStr = `✅ ${fmt}`;
+              else if (d < now) dueStr = `⚠️ SCADUTA ${fmt}`;
+              else if (d <= soon) dueStr = `🔔 ${fmt}`;
+              else dueStr = `📅 ${fmt}`;
+            }
+
+            const parts = [card.name, labelStr, dueStr, memberStr].filter(Boolean);
+            boardLines.push(`    • ${parts.join("  ")}`);
+          }
+        }
+
+        if (boardLines.length > 0) {
+          lines.push(`🗂 ${board.name}`);
+          lines.push(...boardLines);
+          lines.push("");
+        }
+      }
+
+      if (lines.length === 0) {
+        return {
+          content: [
+            { type: "text", text: "Nessuna card trovata con i filtri selezionati." },
+          ],
+        };
+      }
+
+      return { content: [{ type: "text", text: lines.join("\n") }] };
     }
   );
 }

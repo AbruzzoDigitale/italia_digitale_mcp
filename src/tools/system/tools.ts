@@ -2,6 +2,7 @@ import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registry } from "../registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -13,6 +14,14 @@ function run(cmd: string): string {
 }
 
 export function registerSystemTools(server: McpServer): void {
+
+  registry.add({ name: "aggiorna", title: "Aggiorna il Server MCP", category: "🔧 Sistema",
+    description: "Controlla aggiornamenti su Git. Se disponibili, scarica le modifiche e ricompila il server.",
+  });
+  registry.add({ name: "aiuto", title: "Guida ai comandi MCP", category: "🔧 Sistema",
+    description: "Elenca tutti i comandi disponibili con parametri ed esempi. Si aggiorna automaticamente quando vengono aggiunti nuovi tool.",
+  });
+
   server.registerTool(
     "aggiorna",
     {
@@ -73,6 +82,22 @@ export function registerSystemTools(server: McpServer): void {
       return {
         content: [{ type: "text", text: lines.join("\n") }],
       };
+    }
+  );
+
+  // ─── AIUTO ────────────────────────────────────────────────────────────────
+
+  server.registerTool(
+    "aiuto",
+    {
+      title: "Guida ai comandi MCP",
+      description:
+        "Elenca tutti i comandi disponibili nel server MCP con descrizione, parametri e esempi d'uso. " +
+        "Usa questo tool per scoprire cosa puoi fare e come.",
+      inputSchema: {},
+    },
+    async () => {
+      return { content: [{ type: "text", text: registry.format() }] };
     }
   );
 }
