@@ -41,13 +41,18 @@ export function registerSystemTools(server: McpServer): void {
 
         const localHead = run("git rev-parse HEAD");
         const remoteHead = run("git rev-parse @{u}");
+        const shortHash = localHead.slice(0, 7);
+        const commitDate = run("git log -1 --format=%ci HEAD");
+        const pkgVersion = run("node -e \"const p=require('./package.json');console.log(p.version)\"");
+
+        const versionLine = `📌 Versione attuale: v${pkgVersion} · commit ${shortHash} · ${commitDate}`;
 
         if (localHead === remoteHead) {
           return {
             content: [
               {
                 type: "text",
-                text: "✅ Il server è già all'ultima versione. Nessun aggiornamento disponibile.",
+                text: `✅ Il server è già all'ultima versione.\n${versionLine}`,
               },
             ],
           };
@@ -70,9 +75,13 @@ export function registerSystemTools(server: McpServer): void {
         run("npm run build");
         lines.push("✅ Build completata.");
         lines.push("");
-        lines.push(
-          "⚠️  Riavvia il server MCP perché le modifiche abbiano effetto."
-        );
+
+        const newHash = run("git rev-parse HEAD").slice(0, 7);
+        const newDate = run("git log -1 --format=%ci HEAD");
+        const newPkgVersion = run("node -e \"const p=require('./package.json');console.log(p.version)\"");
+        lines.push(`📌 Nuova versione: v${newPkgVersion} · commit ${newHash} · ${newDate}`);
+        lines.push("");
+        lines.push("⚠️  Riavvia il server MCP perché le modifiche abbiano effetto.");
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         lines.push("❌ Errore durante l'aggiornamento:");
