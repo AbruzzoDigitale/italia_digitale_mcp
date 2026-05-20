@@ -9,7 +9,8 @@
     "start": "node build/index.js",
     "dev": "tsc --watch",
     "inspect": "mcp-inspector node build/index.js",
-    "dev:inspect": "nodemon --watch build --ext js --delay 1.5 --exec \"npm run inspect\""
+    "dev:inspect": "nodemon --watch build --ext js --delay 1.5 --exec \"npm run inspect\"",
+    "build:exe": "mkdir -p dist && npx @yao-pkg/pkg installer --out-dir dist"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@modelcontextprotocol/inspector": "^0.21.2",
     "@types/node": "^22.7.5",
+    "@yao-pkg/pkg": "^5.16.1",
     "nodemon": "^3.1.14",
     "typescript": "^5.6.3"
   }
