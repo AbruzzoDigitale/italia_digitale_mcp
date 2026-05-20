@@ -34,8 +34,13 @@ const PROJECT_DIR = isWin
 // ─── Path Claude Desktop config (per OS) ──────────────────────────────────────
 function getClaudeConfigPath() {
   switch (process.platform) {
-    case "win32":
-      return path.join(process.env.APPDATA || "", "Claude", "claude_desktop_config.json");
+    case "win32": {
+      // %APPDATA% = C:\Users\<user>\AppData\Roaming  (sempre presente su Windows)
+      // Fallback manuale nel caso raro in cui la variabile non sia settata
+      const appData = process.env.APPDATA
+        || path.join(os.homedir(), "AppData", "Roaming");
+      return path.join(appData, "Claude", "claude_desktop_config.json");
+    }
     case "darwin":
       return path.join(os.homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
     default:
@@ -161,6 +166,17 @@ async function main() {
   info("Configurazione Claude Desktop...");
 
   const claudeConfigPath = getClaudeConfigPath();
+
+  // Avvisa se la cartella Claude non esiste (Claude Desktop non installato o path diverso)
+  if (!fs.existsSync(path.dirname(claudeConfigPath))) {
+    warn(`Cartella Claude non trovata in:\n     ${path.dirname(claudeConfigPath)}`);
+    warn("Assicurati che Claude Desktop sia installato, poi riavvia l'installer.");
+    warn("Se è installato in una posizione diversa, aggiungi manualmente:");
+    warn(`  File: ${claudeConfigPath}`);
+    warn(`  Chiave: mcpServers > italia-digitale-mcp`);
+    warn(`  command: node  |  args: ["${buildPath}"]`);
+  }
+
   const config = readJson(claudeConfigPath);
   if (!config.mcpServers) config.mcpServers = {};
 
