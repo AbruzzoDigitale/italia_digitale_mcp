@@ -66,6 +66,55 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
 }
 
+// ─── Installa Git automaticamente se mancante ─────────────────────────────────
+function tryInstallGit() {
+  warn("Git non trovato. Provo ad installarlo automaticamente...");
+
+  if (process.platform === "darwin") {
+    // Prova Homebrew
+    try {
+      execSync("which brew", { stdio: "pipe" });
+      info("Homebrew trovato. Installo Git (qualche minuto)...");
+      execSync("brew install git", { stdio: "inherit" });
+      ok("Git installato tramite Homebrew.");
+      return true; // posso continuare nello stesso processo
+    } catch { /* brew non disponibile */ }
+
+    // Fallback: Xcode Command Line Tools (apre una GUI, poi bisogna rilanciare)
+    info("Avvio installazione Xcode Command Line Tools...");
+    try {
+      execSync("xcode-select --install", { stdio: "inherit" });
+    } catch { /* già installato o errore ignorabile */ }
+    console.log(`
+  ${c.yellow}Una finestra di sistema si è aperta per installare Git.${c.reset}
+  Completa l'installazione, poi ${c.bold}esegui di nuovo questo installer${c.reset}.
+`);
+    process.exit(0);
+  }
+
+  if (process.platform === "win32") {
+    // Prova winget (disponibile su Windows 10 21H1+ e Windows 11)
+    try {
+      execSync("winget --version", { stdio: "pipe" });
+      info("Installo Git tramite Windows Package Manager (winget)...");
+      execSync(
+        "winget install --id Git.Git -e --source winget --silent " +
+        "--accept-package-agreements --accept-source-agreements",
+        { stdio: "inherit" }
+      );
+      ok("Git installato con successo.");
+      console.log(`
+  ${c.yellow}Riapri questo installer per continuare${c.reset}
+  (necessario per aggiornare il PATH di sistema).
+`);
+      process.exit(0); // il PATH si aggiorna solo in un nuovo processo
+    } catch { /* winget non disponibile */ }
+  }
+
+  // Nessun metodo automatico disponibile
+  return false;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.clear();
@@ -91,7 +140,14 @@ async function main() {
     const gitVer = execSync("git --version", { encoding: "utf-8" }).trim();
     ok(`${gitVer} trovato.`);
   } catch {
-    err("Git non trovato.\nScarica e installa Git da: https://git-scm.com\nPoi esegui di nuovo questo installer.");
+    const installed = tryInstallGit();
+    if (!installed) {
+      err(
+        "Git non trovato e installazione automatica non riuscita.\n" +
+        "  Installa Git manualmente da: https://git-scm.com\n" +
+        "  Poi esegui di nuovo questo installer."
+      );
+    }
   }
 
   // ── 2. Clona o aggiorna il repo ───────────────────────────────────────────
