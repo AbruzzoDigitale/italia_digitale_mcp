@@ -270,70 +270,67 @@ export interface BoardOverview {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Singola chiamata per board: lists + cards + members in un unico round-trip
 async function fetchBoardData(
   client: AxiosInstance,
-  board: { id: string; name: string; url: string }
+  board: { id: string; name: string; url: string },
+  retries = 2
 ): Promise<BoardOverview> {
-  const [listsRaw, cardsRaw, membersRaw] = await Promise.all([
-    client
-      .get(`/boards/${board.id}/lists`, {
-        params: { fields: "id,name", filter: "open" },
-      })
-      .then((r) => r.data),
-    client
-      .get(`/boards/${board.id}/cards`, {
-        params: {
-          fields: "id,name,due,dueComplete,labels,idMembers,idList,url",
-          filter: "open",
-        },
-      })
-      .then((r) => r.data),
-    client
-      .get(`/boards/${board.id}/members`, {
-        params: { fields: "id,username,fullName" },
-      })
-      .then((r) => r.data),
-  ]);
+  try {
+    const res = await client.get(`/boards/${board.id}`, {
+      params: {
+        cards:        "open",
+        card_fields:  "id,name,due,dueComplete,labels,idMembers,idList,url",
+        lists:        "open",
+        list_fields:  "id,name",
+        members:      "all",
+        member_fields:"id,username,fullName",
+        fields:       "id,name,url",
+      },
+    });
+    const data = res.data;
 
-  const memberMap: Record<string, MemberRef> = {};
-  for (const m of membersRaw) {
-    memberMap[m.id] = { id: m.id, username: m.username, fullName: m.fullName };
-  }
+    const memberMap: Record<string, MemberRef> = {};
+    for (const m of data.members ?? []) {
+      memberMap[m.id] = { id: m.id, username: m.username, fullName: m.fullName };
+    }
 
-  const lists: ListOverview[] = listsRaw.map(
-    (list: { id: string; name: string }) => ({
+    const listsRaw: { id: string; name: string }[] = data.lists ?? [];
+    const cardsRaw: {
+      id: string; name: string; due: string | null; dueComplete: boolean;
+      labels: { id: string; name: string; color: string }[];
+      idMembers: string[]; idList: string; url: string;
+    }[] = data.cards ?? [];
+
+    const lists: ListOverview[] = listsRaw.map((list) => ({
       id: list.id,
       name: list.name,
       cards: cardsRaw
-        .filter((c: { idList: string }) => c.idList === list.id)
-        .map(
-          (c: {
-            id: string;
-            name: string;
-            due: string | null;
-            dueComplete: boolean;
-            labels: { id: string; name: string; color: string }[];
-            idMembers: string[];
-            url: string;
-          }) => ({
-            id: c.id,
-            name: c.name,
-            due: c.due ?? null,
-            dueComplete: c.dueComplete ?? false,
-            labels: c.labels ?? [],
-            members: (c.idMembers ?? []).map(
-              (mid) =>
-                memberMap[mid] ?? { id: mid, username: mid, fullName: mid }
-            ),
-            listId: list.id,
-            listName: list.name,
-            url: c.url,
-          })
-        ),
-    })
-  );
+        .filter((c) => c.idList === list.id)
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          due: c.due ?? null,
+          dueComplete: c.dueComplete ?? false,
+          labels: c.labels ?? [],
+          members: (c.idMembers ?? []).map(
+            (mid) => memberMap[mid] ?? { id: mid, username: mid, fullName: mid }
+          ),
+          listId: list.id,
+          listName: list.name,
+          url: c.url,
+        })),
+    }));
 
-  return { id: board.id, name: board.name, url: board.url, lists };
+    return { id: board.id, name: board.name, url: board.url, lists };
+  } catch (err: unknown) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 429 && retries > 0) {
+      await delay(1000);
+      return fetchBoardData(client, board, retries - 1);
+    }
+    throw err;
+  }
 }
 
 export async function getBoardOverview(
@@ -343,11 +340,12 @@ export async function getBoardOverview(
   const boards: { id: string; name: string; url: string }[] =
     await getBoards(boardFilter);
 
-  const overviews: BoardOverview[] = [];
-  for (let i = 0; i < boards.length; i++) {
-    if (i > 0) await delay(150);
-    overviews.push(await fetchBoardData(client, boards[i]));
-  }
+  // Tutte le board in parallelo — 1 chiamata per board (lista + card + membri)
+  const results = await Promise.allSettled(
+    boards.map((board) => fetchBoardData(client, board))
+  );
 
-  return overviews;
+  return results
+    .filter((r): r is PromiseFulfilledResult<BoardOverview> => r.status === "fulfilled")
+    .map((r) => r.value);
 }
